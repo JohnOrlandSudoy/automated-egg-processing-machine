@@ -2,7 +2,7 @@ import { useRef, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useMachine } from '../context/MachineContext';
-import { Stage, type EggData, type EggMeshTemplates } from '../hooks/useStageMachine';
+import { type EggData, type EggMeshTemplates } from '../hooks/useStageMachine';
 import {
   EGG_PATH_STATION_X,
   EGG_PATH_Y_WORLD,
@@ -11,12 +11,15 @@ import {
   EGG_SPAWN_X_OFFSET,
   EGG_WORLD_MAX_DIM,
 } from '../constants/stations';
+import { PRE_CHAMBER_SEC, PROCESS_DWELL_SEC } from '../constants/processTiming';
 import { deepDisposeObject3D, detachMeshesToUniqueBuffers } from '../utils/threeDisposal';
 
 type StationStage = keyof typeof EGG_PATH_STATION_X;
 
-/** Antala pagitan ng cycle (wall-clock) — hindi sinusundan ang speed slider. */
 const IDLE_SPAWN_GAP_SEC = 0.45;
+
+/** Reference length (cm) para sa visual scale ng egg mesh. */
+const REF_LENGTH_CM = 5.75;
 
 function targetPos(stage: StationStage, eggSize: string): THREE.Vector3 {
   const x = EGG_PATH_STATION_X[stage];
@@ -45,7 +48,6 @@ function tintRejectGray(root: THREE.Object3D) {
   });
 }
 
-/** Mas matingkad ang itlog sa ibabaw ng makina (madilim na materyal). */
 function boostEggVisibility(root: THREE.Object3D) {
   root.traverse((o) => {
     const mesh = o as THREE.Mesh;
@@ -61,6 +63,11 @@ function boostEggVisibility(root: THREE.Object3D) {
   });
 }
 
+function applyEggLengthScale(inst: THREE.Object3D, egg: EggData) {
+  const factor = THREE.MathUtils.clamp(egg.lengthCm / REF_LENGTH_CM, 0.72, 1.22);
+  inst.scale.multiplyScalar(factor);
+}
+
 function rebuildEggChild(group: THREE.Group, egg: EggData, templates: EggMeshTemplates) {
   while (group.children.length > 0) {
     const c = group.children[0];
@@ -74,13 +81,14 @@ function rebuildEggChild(group: THREE.Group, egg: EggData, templates: EggMeshTem
   if (proto) {
     const inst = proto.clone(true);
     detachMeshesToUniqueBuffers(inst);
+    applyEggLengthScale(inst, egg);
     if (egg.size === 'Reject') tintRejectGray(inst);
     else boostEggVisibility(inst);
     group.add(inst);
     return;
   }
 
-  const r = EGG_WORLD_MAX_DIM * 0.5;
+  const r = EGG_WORLD_MAX_DIM * 0.5 * THREE.MathUtils.clamp(egg.lengthCm / REF_LENGTH_CM, 0.72, 1.22);
   const mesh = new THREE.Mesh(
     new THREE.SphereGeometry(r, 20, 16),
     new THREE.MeshStandardMaterial({
@@ -106,7 +114,8 @@ export function EggAnimator() {
       EGG_BELT_Z_WORLD
     )
   );
-  const stageTimerRef = useRef(0);
+  const preChamberRef = useRef(0);
+  const processDwellRef = useRef(0);
   const idleTimerRef = useRef(0);
   const wobbleRef = useRef(0);
 
@@ -122,9 +131,15 @@ export function EggAnimator() {
         EGG_PATH_Y_WORLD,
         EGG_BELT_Z_WORLD
       );
-      stageTimerRef.current = 0;
+      preChamberRef.current = 0;
+      processDwellRef.current = 0;
     }
   }, [egg?.id, stage]);
+
+  useEffect(() => {
+    preChamberRef.current = 0;
+    processDwellRef.current = 0;
+  }, [stage]);
 
   useFrame((_, delta) => {
     if (stage === 'Idle') {
@@ -160,24 +175,27 @@ export function EggAnimator() {
       groupRef.current.rotation.z = THREE.MathUtils.lerp(groupRef.current.rotation.z, 0, delta * 4);
     }
 
-    const dwellTimes: Record<Stage, number> = {
-      Input: 0.6,
-      Cleaning: 1.4,
-      Weighing: 0.8,
-      Vision: 1.2,
-      Sorting: 0.9,
-      Output: 0.5,
-      Idle: 99,
-    };
-
     const arrived = dist < 0.08;
-    if (arrived) {
-      stageTimerRef.current += scaledDelta;
-      if (stageTimerRef.current >= dwellTimes[stage]) {
-        stageTimerRef.current = 0;
-        wobbleRef.current = 0;
-        advanceStage(stage);
-      }
+    if (!arrived) {
+      preChamberRef.current = 0;
+      processDwellRef.current = 0;
+      return;
+    }
+
+    const preLimit = PRE_CHAMBER_SEC[stage] ?? 0;
+    const dwellLimit = PROCESS_DWELL_SEC[stage] ?? 0.6;
+
+    if (preChamberRef.current < preLimit) {
+      preChamberRef.current += scaledDelta;
+      return;
+    }
+
+    processDwellRef.current += scaledDelta;
+    if (processDwellRef.current >= dwellLimit) {
+      processDwellRef.current = 0;
+      preChamberRef.current = 0;
+      wobbleRef.current = 0;
+      advanceStage(stage);
     }
   });
 

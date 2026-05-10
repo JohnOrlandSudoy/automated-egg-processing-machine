@@ -253,6 +253,47 @@ function registerBuiltInEggTemplates(
 }
 
 /** Umiikot ang rollers; UV scroll sa `ConveyorBelt_Surface` kung may texture map. */
+const INTERIOR_GHOST_WALL = /^(Chamber_|Vision_)(Front|Back|Left|Right|Top|Bottom)Wall$/i;
+
+function InteriorOpacityGlue({ root }: { root: THREE.Object3D }) {
+  const { interiorView } = useMachine();
+  const snapshotRef = useRef(
+    new Map<THREE.Material, { opacity: number; transparent: boolean; depthWrite: boolean }>()
+  );
+
+  useLayoutEffect(() => {
+    root.traverse((o) => {
+      if (!(o instanceof THREE.Mesh) || !o.material) return;
+      if (!INTERIOR_GHOST_WALL.test(o.name)) return;
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      for (const mat of mats) {
+        const m = mat as THREE.MeshStandardMaterial;
+        if (!snapshotRef.current.has(m)) {
+          snapshotRef.current.set(m, {
+            opacity: m.opacity,
+            transparent: m.transparent,
+            depthWrite: m.depthWrite,
+          });
+        }
+        const snap = snapshotRef.current.get(m)!;
+        if (interiorView) {
+          m.transparent = true;
+          m.opacity = 0.2;
+          m.depthWrite = false;
+          m.side = THREE.DoubleSide;
+        } else {
+          m.opacity = snap.opacity;
+          m.transparent = snap.transparent;
+          m.depthWrite = snap.depthWrite;
+        }
+        m.needsUpdate = true;
+      }
+    });
+  }, [root, interiorView]);
+
+  return null;
+}
+
 function FbxConveyorDrives({ root }: { root: THREE.Object3D }) {
   const { running, speed } = useMachine();
   const rollersRef = useRef<THREE.Object3D[]>([]);
@@ -345,6 +386,7 @@ export function MachineFbxModel() {
   return (
     <>
       <primitive object={scene} dispose={null} />
+      <InteriorOpacityGlue root={scene} />
       <FbxConveyorDrives root={scene} />
       <OrbitControlsSnapshotGlue />
     </>

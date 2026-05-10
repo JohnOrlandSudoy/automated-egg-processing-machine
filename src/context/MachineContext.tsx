@@ -14,6 +14,8 @@ interface MachineContextValue {
   toggleRunning: () => void;
   eggMeshTemplates: EggMeshTemplates;
   registerEggMeshTemplates: (t: EggMeshTemplates) => void;
+  interiorView: boolean;
+  setInteriorView: (v: boolean) => void;
 }
 
 const MachineContext = createContext<MachineContextValue | null>(null);

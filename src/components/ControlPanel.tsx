@@ -1,5 +1,6 @@
 import { useMachine } from '../context/MachineContext';
 import { Stage } from '../hooks/useStageMachine';
+import { CATEGORY_SPEC } from '../simulation/eggSizing';
 
 /** Mga processing stage (walang Idle) — para sa "done" at weight visibility. */
 const PIPELINE_STAGES: Stage[] = ['Input', 'Cleaning', 'Weighing', 'Vision', 'Sorting', 'Output'];
@@ -21,11 +22,28 @@ interface ControlPanelProps {
   onResetCamera: () => void;
 }
 
+function statusClass(s: string) {
+  if (s === 'Clean') return 'text-emerald-400';
+  if (s === 'Soiled') return 'text-amber-300';
+  return 'text-red-400';
+}
+
 export function ControlPanel({ onResetCamera }: ControlPanelProps) {
-  const { stage, egg, stats, speed, running, setSpeed, toggleRunning, resetStats } = useMachine();
+  const {
+    stage,
+    egg,
+    stats,
+    speed,
+    running,
+    setSpeed,
+    toggleRunning,
+    resetStats,
+    interiorView,
+    setInteriorView,
+  } = useMachine();
 
   return (
-    <div className="absolute inset-y-0 left-0 w-64 flex flex-col gap-3 p-4 overflow-y-auto pointer-events-none">
+    <div className="absolute inset-y-0 left-0 w-[22rem] flex flex-col gap-3 p-4 overflow-y-auto pointer-events-none">
       {/* Title card */}
       <div
         className="rounded-xl p-4 pointer-events-auto"
@@ -77,20 +95,31 @@ export function ControlPanel({ onResetCamera }: ControlPanelProps) {
         </div>
       </div>
 
-      {/* Egg info */}
+      {/* Egg + sensor readout (sync sa stage / chamber) */}
       <div
         className="rounded-xl p-4 pointer-events-auto"
         style={{ background: 'rgba(10,20,30,0.88)', border: '1px solid rgba(255,255,255,0.08)' }}
       >
-        <div className="text-xs font-semibold tracking-widest uppercase text-slate-400 mb-3">
-          Current Egg
+        <div className="text-xs font-semibold tracking-widest uppercase text-slate-400 mb-1">
+          Egg &amp; sensors
+        </div>
+        <div className="text-[10px] text-slate-500 mb-2 leading-snug">
+          Timbang may dumi → matapos hugas. Sukat (L×W) = vision / camera sort. Sakto ang readout sa bawat
+          chamber habang tumatakbo ang stage.
         </div>
         {egg ? (
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <span className="text-slate-400 text-sm">Size</span>
+          <div className="flex flex-col gap-2 text-sm">
+            <div className="rounded-lg bg-slate-900/80 border border-slate-700/50 px-2 py-1.5 mb-1">
+              <div className="text-[10px] uppercase tracking-wider text-slate-500 mb-0.5">Active chamber</div>
+              <div className="text-emerald-300 font-semibold">
+                {stage === 'Idle' ? 'Idle (hihintay)' : stage}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-slate-400">Size (camera)</span>
               <span
-                className="text-sm font-bold px-2 py-0.5 rounded-full"
+                className="font-bold px-2 py-0.5 rounded-full text-xs shrink-0"
                 style={{
                   background: egg.color + '30',
                   color: egg.color,
@@ -100,30 +129,55 @@ export function ControlPanel({ onResetCamera }: ControlPanelProps) {
                 {egg.size}
               </span>
             </div>
+
             <div className="flex items-center justify-between">
-              <span className="text-slate-400 text-sm">Status</span>
-              <span
-                className={`text-sm font-semibold ${
-                  egg.status === 'Clean' ? 'text-emerald-400' : 'text-red-400'
-                }`}
-              >
-                {egg.status}
+              <span className="text-slate-400">L × W</span>
+              <span className="text-white font-mono text-xs">
+                {egg.lengthCm} × {egg.widthCm} cm
               </span>
             </div>
+
             <div className="flex items-center justify-between">
-              <span className="text-slate-400 text-sm">Weight</span>
-              <span className="text-white text-sm font-mono">
-                {(() => {
-                  const wi = PIPELINE_STAGES.indexOf('Weighing');
-                  const si =
-                    stage === 'Idle' ? PIPELINE_STAGES.length : PIPELINE_STAGES.indexOf(stage as (typeof PIPELINE_STAGES)[number]);
-                  return si >= wi ? `${egg.weight}g` : '—';
-                })()}
+              <span className="text-slate-400">Pre-wash (may dumi)</span>
+              <span className="text-amber-200 font-mono">{egg.weightDirtyG} g</span>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <span className="text-slate-400">Pagkatapos hugas</span>
+              <span className="text-cyan-200 font-mono">
+                {egg.weightCleanG != null ? `${egg.weightCleanG} g` : '—'}
               </span>
             </div>
+
+            {egg.mudRemovedG != null && egg.mudRemovedG > 0 && (
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Dumi natanggal</span>
+                <span className="text-slate-200 font-mono">
+                  −{egg.mudRemovedG} g ({((egg.mudRemovedG / egg.weightDirtyG) * 100).toFixed(0)}%)
+                </span>
+              </div>
+            )}
+
             <div className="flex items-center justify-between">
-              <span className="text-slate-400 text-sm">Egg #</span>
-              <span className="text-slate-300 text-sm font-mono">{egg.id}</span>
+              <span className="text-slate-400">Status</span>
+              <span className={`font-semibold ${statusClass(egg.status)}`}>{egg.status}</span>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <span className="text-slate-400">Display weight (UI)</span>
+              <span className="text-white font-mono">{egg.weight} g</span>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <span className="text-slate-400">Egg #</span>
+              <span className="text-slate-300 font-mono">{egg.id}</span>
+            </div>
+
+            <div className="mt-1 pt-2 border-t border-slate-700/50 text-[10px] text-slate-500 leading-relaxed">
+              Bands: S {CATEGORY_SPEC.Small.weightMinG}–{CATEGORY_SPEC.Small.weightMaxG}g L
+              {CATEGORY_SPEC.Small.lengthMinCm}–{CATEGORY_SPEC.Small.lengthMaxCm} · M{' '}
+              {CATEGORY_SPEC.Medium.weightMinG}–{CATEGORY_SPEC.Medium.weightMaxG} · L{' '}
+              {CATEGORY_SPEC.Large.weightMinG}–{CATEGORY_SPEC.Large.weightMaxG} (vision)
             </div>
           </div>
         ) : (
@@ -214,6 +268,18 @@ export function ControlPanel({ onResetCamera }: ControlPanelProps) {
           }`}
         >
           {running ? 'Pause' : 'Start'}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setInteriorView(!interiorView)}
+          className={`w-full mt-2 py-2 rounded-lg font-semibold text-sm border transition-all duration-200 ${
+            interiorView
+              ? 'bg-sky-500/25 text-sky-200 border-sky-500/40'
+              : 'text-slate-300 border-slate-600 hover:bg-slate-700/40'
+          }`}
+        >
+          {interiorView ? 'Loob: bukas (cutaway)' : 'Tingnan ang loob ng chamber'}
         </button>
 
         {/* Reset camera */}
